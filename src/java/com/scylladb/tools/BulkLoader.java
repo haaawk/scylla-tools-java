@@ -47,6 +47,7 @@ import static com.scylladb.tools.SSTableToCQL.TTL_VAR_NAME;
 import static java.lang.Thread.currentThread;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.openForBatch;
 import static org.apache.cassandra.schema.CQLTypeParser.parse;
+import static org.junit.Assume.assumeTrue;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -1263,6 +1264,8 @@ public class BulkLoader {
             } else if (dir.getParentFile().getName().equals("snapshots")) {
                 dir = dir.getParentFile().getParentFile();
             }
+            
+            System.out.println("Looking for sstables in directory: " + dir.getPath());
 
             final String keyspace = dir.getParentFile().getName();
             final CQLClient client = new CQLClient(options, keyspace);
@@ -1277,14 +1280,20 @@ public class BulkLoader {
             final ConcurrentLinkedQueue<SSTableToCQL> tasks = new ConcurrentLinkedQueue<>();
             final CountDownLatch latch = new CountDownLatch(options.threadCount);
             final ColumnNamesMapping columnNamesMapping = new ColumnNamesMapping(options.columnNamesMappings);
+            
+            System.out.println("Found following sstables:");
+            for (Pair<Descriptor, Set<Component>> f : files) {
+                System.out.println(f.left.filenameFor(Component.DATA));
+            }
 
             long totalBytes = ranges.size() * files.stream().mapToLong((p) -> {
                 return new File(p.left.filenameFor(Component.DATA)).length();
             }).sum();
-            
+            System.out.println("Starting threads with " + files.size() + " files");
             for (int i = 0; i < options.threadCount; ++i) {
                 executor.submit(() -> {
                     try {
+                        System.out.println("Thread " + Thread.currentThread().getName() + ": sees " + files.size() + " files");
                         process(options, keyspace, tasks, files, ranges, client, columnNamesMapping);
                     } finally {
                         latch.countDown();
@@ -1413,7 +1422,9 @@ public class BulkLoader {
             ColumnNamesMapping columnNamesMapping) {
         // always use a copy of the client to keep from
         // colliding with other threads.
+        System.out.println("Thread " + Thread.currentThread().getName() + ": starting");
         final CQLClient c = client.copy();
+        System.out.println("Thread " + Thread.currentThread().getName() + ": opened a client");
         try {
             boolean triedFiles = false;
             while (!Thread.interrupted()) {
@@ -1421,10 +1432,11 @@ public class BulkLoader {
                 // sstable slice)
                 SSTableToCQL t;
                 if ((t = tasks.poll()) != null) {
+                    System.out.println("Thread " + Thread.currentThread().getName() + ": Running task " + t.toString());
                     t.run(c);
                     continue;
                 }
-
+                System.out.println("Thread " + Thread.currentThread().getName() + ": no task found -> preparing some");
                 // need to synchronize here so all executor threads wait
                 // for the last file to be turned into tasks.
                 synchronized (files) {
@@ -1432,16 +1444,20 @@ public class BulkLoader {
                     // of sources.
                     for (;;) {
                         if (files.isEmpty() && triedFiles) {
+                            System.out.println("Thread " + Thread.currentThread().getName() + ": no more files and tried - files size = " + files.size() + ", tried = " + triedFiles);
                             return;
                         }
                         if (files.isEmpty()) {
+                            System.out.println("Thread " + Thread.currentThread().getName() + ": no more files " + files.size());
                             triedFiles = true;
                             continue; // see if any tasks.
                         }
                         Pair<Descriptor, Set<Component>> p = files.remove(0);
                         CFMetaData cfm = columnNamesMapping.getMetadata(client.getCFMetaData(keyspace, p.left.cfname));
+                        System.out.println("Thread " + Thread.currentThread().getName() + ": Openning " + p.left.filenameFor(Component.DATA));
                         SSTableReader r = openFile(p, cfm);
                         if (r != null) {
+                            System.out.println("Thread " + Thread.currentThread().getName() + ": Opened " + p.left.filenameFor(Component.DATA));
                             // We could open it. Turn into tasks and submit to
                             // workers.
                             if (client.verbose.greaterOrEqual(Verbosity.Verbose)) {
@@ -1503,7 +1519,11 @@ public class BulkLoader {
                     }
                 }
             }
+        } catch (Throwable t) {
+            System.out.println("Exception: " + t);
+            t.printStackTrace();
         } finally {
+            System.out.println("Thread " + Thread.currentThread().getName() + ": done");
             // drain all remaining statements in queue before terminating.
             c.close();
         }

@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.tools;
 
+import static org.apache.cassandra.tools.Profiler.*;
+
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.management.ManagementFactory;
@@ -179,6 +181,9 @@ public class NodeProbe implements AutoCloseable
      */
     private void connect() throws IOException
     {
+    	long startTime = System.currentTimeMillis();
+    	try {
+    		
         JMXServiceURL jmxUrl = new JMXServiceURL(String.format(fmtUrl, host, port));
         Map<String,Object> env = new HashMap<String,Object>();
         if (username != null)
@@ -189,33 +194,45 @@ public class NodeProbe implements AutoCloseable
 
         env.put("com.sun.jndi.rmi.factory.socket", getRMIClientSocketFactory());
 
-        jmxc = JMXConnectorFactory.connect(jmxUrl, env);
+        long startTime2 = System.currentTimeMillis();
+        try {
+        	jmxc = JMXConnectorFactory.connect(jmxUrl, env);
+        } finally {
+        	long endTime2 = System.currentTimeMillis();
+        	System.err.println("JMXConnectorFactory.connect took " + (endTime2 - startTime2) + " ms");
+        }
+        long startTime3 = System.currentTimeMillis();
+        try {
         mbeanServerConn = jmxc.getMBeanServerConnection();
+        } finally {
+        	long endTime3 = System.currentTimeMillis();
+        	System.err.println("JMXConnectorFactory.connect took " + (endTime3 - startTime3) + " ms");
+        }
 
         try
         {
-            ObjectName name = new ObjectName(ssObjName);
-            ssProxy = JMX.newMBeanProxy(mbeanServerConn, name, StorageServiceMBean.class);
-            name = new ObjectName(MessagingService.MBEAN_NAME);
-            msProxy = JMX.newMBeanProxy(mbeanServerConn, name, MessagingServiceMBean.class);
-            name = new ObjectName(StreamManagerMBean.OBJECT_NAME);
-            streamProxy = JMX.newMBeanProxy(mbeanServerConn, name, StreamManagerMBean.class);
-            name = new ObjectName(CompactionManager.MBEAN_OBJECT_NAME);
-            compactionProxy = JMX.newMBeanProxy(mbeanServerConn, name, CompactionManagerMBean.class);
-            name = new ObjectName(FailureDetector.MBEAN_NAME);
-            fdProxy = JMX.newMBeanProxy(mbeanServerConn, name, FailureDetectorMBean.class);
-            name = new ObjectName(CacheService.MBEAN_NAME);
-            cacheService = JMX.newMBeanProxy(mbeanServerConn, name, CacheServiceMBean.class);
-            name = new ObjectName(StorageProxy.MBEAN_NAME);
-            spProxy = JMX.newMBeanProxy(mbeanServerConn, name, StorageProxyMBean.class);
-            name = new ObjectName(HintedHandOffManager.MBEAN_NAME);
-            hhProxy = JMX.newMBeanProxy(mbeanServerConn, name, HintedHandOffManagerMBean.class);
-            name = new ObjectName(GCInspector.MBEAN_NAME);
-            gcProxy = JMX.newMBeanProxy(mbeanServerConn, name, GCInspectorMXBean.class);
-            name = new ObjectName(Gossiper.MBEAN_NAME);
-            gossProxy = JMX.newMBeanProxy(mbeanServerConn, name, GossiperMBean.class);
-            name = new ObjectName(BatchlogManager.MBEAN_NAME);
-            bmProxy = JMX.newMBeanProxy(mbeanServerConn, name, BatchlogManagerMBean.class);
+            {ObjectName name = new ObjectName(ssObjName);
+            ssProxy = profile("Connecting to ssProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, StorageServiceMBean.class); });}
+            {ObjectName name = new ObjectName(MessagingService.MBEAN_NAME);
+            msProxy = profile("Connecting to msProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, MessagingServiceMBean.class); });}
+            {ObjectName name = new ObjectName(StreamManagerMBean.OBJECT_NAME);
+            streamProxy = profile("Connecting to streamProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, StreamManagerMBean.class); });}
+            {ObjectName name = new ObjectName(CompactionManager.MBEAN_OBJECT_NAME);
+            compactionProxy = profile("Connecting to compactionProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, CompactionManagerMBean.class); });}
+            {ObjectName name = new ObjectName(FailureDetector.MBEAN_NAME);
+            fdProxy = profile("Connecting to fdProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, FailureDetectorMBean.class); });}
+            {ObjectName name = new ObjectName(CacheService.MBEAN_NAME);
+            cacheService = profile("Connecting to cacheService", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, CacheServiceMBean.class); });}
+            {ObjectName name = new ObjectName(StorageProxy.MBEAN_NAME);
+            spProxy = profile("Connecting to spProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, StorageProxyMBean.class); });}
+            {ObjectName name = new ObjectName(HintedHandOffManager.MBEAN_NAME);
+            hhProxy = profile("Connecting to hhProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, HintedHandOffManagerMBean.class); });}
+            {ObjectName name = new ObjectName(GCInspector.MBEAN_NAME);
+            gcProxy = profile("Connecting to gcProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, GCInspectorMXBean.class); });}
+            {ObjectName name = new ObjectName(Gossiper.MBEAN_NAME);
+            gossProxy = profile("Connecting to gossProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, GossiperMBean.class); });}
+            {ObjectName name = new ObjectName(BatchlogManager.MBEAN_NAME);
+            bmProxy = profile("Connecting to bmProxy", () -> { return JMX.newMBeanProxy(mbeanServerConn, name, BatchlogManagerMBean.class); });}
         }
         catch (MalformedObjectNameException e)
         {
@@ -223,10 +240,26 @@ public class NodeProbe implements AutoCloseable
                     "Invalid ObjectName? Please report this as a bug.", e);
         }
 
+        long startTime4 = System.currentTimeMillis();
+        try {
         memProxy = ManagementFactory.newPlatformMXBeanProxy(mbeanServerConn,
                 ManagementFactory.MEMORY_MXBEAN_NAME, MemoryMXBean.class);
+        } finally {
+        	long endTime4 = System.currentTimeMillis();
+        	System.err.println("ManagementFactory.MEMORY_MXBEAN_NAME took " + (endTime4 - startTime4) + " ms");
+        }
+        long startTime5 = System.currentTimeMillis();
+        try {
         runtimeProxy = ManagementFactory.newPlatformMXBeanProxy(
                 mbeanServerConn, ManagementFactory.RUNTIME_MXBEAN_NAME, RuntimeMXBean.class);
+        } finally {
+        	long endTime5 = System.currentTimeMillis();
+        	System.err.println("ManagementFactory.RUNTIME_MXBEAN_NAME took " + (endTime5 - startTime5) + " ms");
+        }
+    	} finally {
+    		long endTime = System.currentTimeMillis();
+    		System.err.println("NodeProbe connection took " + (endTime - startTime) + " ms");
+    	}
     }
 
     private RMIClientSocketFactory getRMIClientSocketFactory()

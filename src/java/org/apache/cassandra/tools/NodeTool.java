@@ -18,6 +18,7 @@
 package org.apache.cassandra.tools;
 
 import java.io.*;
+import static org.apache.cassandra.tools.Profiler.*;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
@@ -49,6 +50,7 @@ public class NodeTool
 
     public static void main(String... args)
     {
+    	profile("nodetool", () -> {
         List<Class<? extends Runnable>> commands = asList(
                 Help.class,
                 Info.class,
@@ -166,9 +168,13 @@ public class NodeTool
         int status = 0;
         try
         {
-            Runnable parse = parser.parse(args);
+        	Runnable parse = profile("parsing arguments", () -> {
+        		return parser.parse(args);
+        	});
             printHistory(args);
+            profile("execution", () -> {
             parse.run();
+            });
         } catch (IllegalArgumentException |
                 IllegalStateException |
                 ParseArgumentsMissingException |
@@ -190,6 +196,7 @@ public class NodeTool
         }
 
         System.exit(status);
+    	});
     }
 
     private static void printHistory(String... args)

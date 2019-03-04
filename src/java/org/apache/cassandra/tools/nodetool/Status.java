@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.tools.nodetool;
 
+import static org.apache.cassandra.tools.Profiler.*;
+
 import io.airlift.command.Arguments;
 import io.airlift.command.Command;
 import io.airlift.command.Option;
@@ -55,15 +57,15 @@ public class Status extends NodeToolCmd
     @Override
     public void execute(NodeProbe probe)
     {
-        joiningNodes = probe.getJoiningNodes();
-        leavingNodes = probe.getLeavingNodes();
-        movingNodes = probe.getMovingNodes();
-        loadMap = probe.getLoadMap();
-        Map<String, String> tokensToEndpoints = probe.getTokenToEndpointMap();
-        liveNodes = probe.getLiveNodes();
-        unreachableNodes = probe.getUnreachableNodes();
-        hostIDMap = probe.getHostIdMap();
-        epSnitchInfo = probe.getEndpointSnitchInfoProxy();
+        joiningNodes = profile("Getting joining nodes", () -> { return probe.getJoiningNodes(); });
+        leavingNodes = profile("Getting leaving nodes", () -> { return probe.getLeavingNodes(); });
+        movingNodes = profile("Getting moving nodes", () -> { return probe.getMovingNodes(); });
+        loadMap = profile("Getting load map", () -> { return probe.getLoadMap(); });
+        Map<String, String> tokensToEndpoints = profile("Getting tokens to endpoints", () -> { return probe.getTokenToEndpointMap(); });
+        liveNodes = profile("Getting live nodes", () -> { return probe.getLiveNodes(); });
+        unreachableNodes = profile("Getting unreachable nodes", () -> { return probe.getUnreachableNodes(); });
+        hostIDMap = profile("Getting host id map", () -> { return probe.getHostIdMap(); });
+        epSnitchInfo = profile("Getting snitch info", () -> { return probe.getEndpointSnitchInfoProxy(); });
 
         StringBuilder errors = new StringBuilder();
 
@@ -71,12 +73,12 @@ public class Status extends NodeToolCmd
         boolean hasEffectiveOwns = false;
         try
         {
-            ownerships = probe.effectiveOwnership(keyspace);
+            ownerships = profile("Getting effective ownerships", () -> { return probe.effectiveOwnership(keyspace); });
             hasEffectiveOwns = true;
         }
         catch (IllegalStateException e)
         {
-            ownerships = probe.getOwnership();
+            ownerships = profile("Getting ownerships", () -> { return probe.getOwnership(); });
             errors.append("Note: ").append(e.getMessage()).append("%n");
         }
         catch (IllegalArgumentException ex)
@@ -85,7 +87,8 @@ public class Status extends NodeToolCmd
             System.exit(1);
         }
 
-        SortedMap<String, SetHostStat> dcs = NodeTool.getOwnershipByDc(probe, resolveIp, tokensToEndpoints, ownerships);
+        final Map<InetAddress, Float> finalOwnerships = ownerships;
+        SortedMap<String, SetHostStat> dcs = profile("Getting ownership by dc", () -> { return NodeTool.getOwnershipByDc(probe, resolveIp, tokensToEndpoints, finalOwnerships); });
 
         // More tokens than nodes (aka vnodes)?
         if (dcs.values().size() < tokensToEndpoints.keySet().size())
@@ -93,8 +96,10 @@ public class Status extends NodeToolCmd
 
         findMaxAddressLength(dcs);
 
+        boolean finalHasEffectiveOwns = hasEffectiveOwns;
+        
         // Datacenters
-        for (Map.Entry<String, SetHostStat> dc : dcs.entrySet())
+        profile("Printing output", () -> { for (Map.Entry<String, SetHostStat> dc : dcs.entrySet())
         {
             String dcHeader = String.format("Datacenter: %s%n", dc.getKey());
             System.out.printf(dcHeader);
@@ -105,7 +110,7 @@ public class Status extends NodeToolCmd
             System.out.println("Status=Up/Down");
             System.out.println("|/ State=Normal/Leaving/Joining/Moving");
 
-            printNodesHeader(hasEffectiveOwns, isTokenPerNode);
+            printNodesHeader(finalHasEffectiveOwns, isTokenPerNode);
 
             ArrayListMultimap<InetAddress, HostStat> hostToTokens = ArrayListMultimap.create();
             for (HostStat stat : dc.getValue())
@@ -113,13 +118,14 @@ public class Status extends NodeToolCmd
 
             for (InetAddress endpoint : hostToTokens.keySet())
             {
-                Float owns = ownerships.get(endpoint);
+                Float owns = finalOwnerships.get(endpoint);
                 List<HostStat> tokens = hostToTokens.get(endpoint);
-                printNode(endpoint.getHostAddress(), owns, tokens, hasEffectiveOwns, isTokenPerNode);
+                printNode(endpoint.getHostAddress(), owns, tokens, finalHasEffectiveOwns, isTokenPerNode);
             }
         }
 
         System.out.printf("%n" + errors.toString());
+        });
 
     }
 
